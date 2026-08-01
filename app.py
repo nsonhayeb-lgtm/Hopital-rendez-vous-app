@@ -157,7 +157,7 @@ with onglet2:
         # Sélection du patient et saisie de l'heure
         noms_patients = [p["nom"] for p in liste_patients]
         patient_selectionne = st.selectbox(
-            "Sélectionner le patient qui arrive :", noms_patients
+            "Saisez le nom du patient qui arrive :", noms_patients
         )
 
         heure_arrivee_reelle = st.text_input(
