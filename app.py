@@ -37,6 +37,43 @@ bareme = {
     "Perte de connaissance / Coma": 10,
 }
 
+
+# Fonction d'annulation automatique des rendez-vous dépassés
+def mettre_a_jour_statuts_automatiques(liste_p, maintenant):
+    for p in liste_p:
+        # Seuls les RDV non encore confirmés et non immédiats sont vérifiés
+        if p["statut"] in ["En attente", "Programmé pour demain"] and p["heure_rdv"] != "IMMÉDIAT":
+            try:
+                jour, mois, annee = map(int, p["date_rdv"].split("/"))
+                h_rdv, m_rdv = map(int, p["heure_rdv"].split("h"))
+                rdv_dt = datetime(annee, mois, jour, h_rdv, m_rdv, tzinfo=timezone.utc)
+
+                # Si l'heure actuelle dépasse l'heure du RDV de plus de 10 minutes (tolérance)
+                limite_passage = rdv_dt + timedelta(minutes=10)
+                if maintenant > limite_passage:
+                    p["statut"] = "Annulé (Absence / Non-présenté)"
+            except Exception:
+                pass
+
+
+# Obtention de l'heure GMT actuelle et mise à jour automatique des annulations
+maintenant_gmt = datetime.now(timezone.utc)
+mettre_a_jour_statuts_automatiques(liste_patients, maintenant_gmt)
+
+# ==============================================================================
+# SIGNALEMENT DES ANNULATIONS (Placé sous le titre et l'introduction)
+# ==============================================================================
+patients_annules = [p for p in liste_patients if "Annulé" in p["statut"]]
+if patients_annules:
+    st.error(
+        f"🚨 **SIGNALEMENT D'ANNULATION AUTOMATIQUE :** {len(patients_annules)} rendez-vous annulé(s) pour absence ou retard."
+    )
+    for p in patients_annules:
+        st.warning(
+            f"❌ **Rendez-vous annulé :** {p['nom']} — Créneau de **{p['heure_rdv']}** (du {p['date_rdv']}). Motif : Heure dépassée sans signalement à l'accueil."
+        )
+
+
 # Crée deux onglets dans l'application web
 onglet1, onglet2 = st.tabs(
     ["📝 Inscription Patient", "⏱️ Accueil & Contrôle des Retards"]
@@ -49,7 +86,6 @@ with onglet1:
     st.header("Formulaire d'inscription")
 
     # Affichage de l'heure actuelle en GMT
-    maintenant_gmt = datetime.now(timezone.utc)
     st.info(f"🕒 **Heure actuelle (GMT) :** {maintenant_gmt.strftime('%H:%M')}")
 
     with st.form("form_patient"):
@@ -64,7 +100,7 @@ with onglet1:
         st.write("---")
         st.subheader("Sélectionnez vos symptômes / état :")
 
-        # Affichage UNIQUEMENT des nom des symptômes (sans le score de sévérité)
+        # Affichage UNIQUEMENT des noms des symptômes (sans le score de sévérité)
         cochés = {}
         for symptome in bareme.keys():
             cochés[symptome] = st.checkbox(symptome)
@@ -111,23 +147,22 @@ with onglet1:
                     }
                 )
 
-                st.error("🚨 CAS URGENT / ÉLEVÉ DÉTECTÉE !")
-                st.warning("⚠️ Prise en charge **IMMÉDIATE** requis. Aucune planification de créneau nécessaire.")
+                st.error("🚨 CAS URGENT / ÉLEVÉ DÉTECTÉ !")
+                st.warning("⚠️ Prise en charge **IMMÉDIATE** requise. Aucune planification de créneau nécessaire.")
                 st.info("Veuillez vous présenter DIRECTEMENT au service des urgences de l'hôpital.")
 
             else:
                 # Cas Faible / Moyen -> Planification sur rendez-vous
-                # On ne compte que les patients programmés pour calculer les créneaux
                 patients_programmes = [p for p in liste_patients if p["heure_rdv"] != "IMMÉDIAT"]
                 nb_patients = len(patients_programmes)
                 duree = 15
                 est_apres_20h = maintenant_gmt.hour >= 20
 
                 if est_apres_20h:
-                    # Reprogrammation sur le jour suivant à partir de 08:00 GMT pour les cas non urgents
+                    # Reprogrammation sur le jour suivant à partir de 08:00 GMT
                     date_rdv = maintenant_gmt + timedelta(days=1)
                     total_minutes = nb_patients * duree
-                    
+
                     rdv_dt = datetime(date_rdv.year, date_rdv.month, date_rdv.day, 8, 0, tzinfo=timezone.utc) + timedelta(minutes=total_minutes)
                     heure_rdv = rdv_dt.strftime("%Hh%M")
                     date_str = rdv_dt.strftime("%d/%m/%Y")
@@ -210,6 +245,10 @@ with onglet2:
 
                 if info_p is None:
                     st.error(f"❌ Aucun patient trouvé au nom de '{nom_saisi}'. Veuillez vérifier la saisie.")
+                elif info_p["statut"] == "Annulé (Absence / Non-présenté)":
+                    st.error(
+                        f"❌ Le rendez-vous de **{info_p['nom']}** a été ANNULÉ automatiquement car l'heure est dépassée sans confirmation de présence."
+                    )
                 elif info_p["heure_rdv"] == "IMMÉDIAT":
                     st.error(
                         f"🚨 Patient **{info_p['nom']}** enregistré en PRISE EN CHARGE IMMÉDIATE ({info_p['priorite']}). Envoyez-le directement au service d'urgence !"
@@ -242,7 +281,7 @@ with onglet2:
                             info_p["statut"] = "Présent (Retard accepté)"
                         else:
                             st.error(
-                                f"🚨 RETARD DE {retard} MIN (> 10 min) ! Rendez-vous ANNULÉ ou replacé en fin de file."
+                                f"🚨 RETARD DE {retard} MIN (> 10 min) ! Rendez-vous ANNULÉ."
                             )
                             info_p["statut"] = "Annulé (Retard)"
                     except ValueError:
