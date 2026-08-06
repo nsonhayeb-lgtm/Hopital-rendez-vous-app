@@ -21,7 +21,7 @@ def obtenir_registre_global():
 # On récupère la liste partagée
 liste_patients = obtenir_registre_global()
 
-# Nouveau barème complet des symptômes (sans descriptions)
+# Nouveau barème complet des symptômes
 bareme = {
     "Congestion nasale (nez bouché)": 1,
     "Maux de gorge légers": 2,
@@ -64,10 +64,10 @@ with onglet1:
         st.write("---")
         st.subheader("Sélectionnez vos symptômes / état :")
 
-        # Dynamisation des cases à cocher à partir du barème
+        # Affichage UNIQUEMENT des nom des symptômes (sans le score de sévérité)
         cochés = {}
-        for symptome, score in bareme.items():
-            cochés[symptome] = st.checkbox(f"{symptome} (Sévérité: {score})")
+        for symptome in bareme.keys():
+            cochés[symptome] = st.checkbox(symptome)
 
         st.write("---")
         st.write("**Cas d'urgences graves :**")
@@ -80,11 +80,6 @@ with onglet1:
     if submit:
         if not nom:
             st.error("Veuillez entrer votre nom.")
-        elif urgence_vitale:
-            st.error("🚨 URGENCE CRITIQUE DÉTECTÉE !")
-            st.warning(
-                "Ne venez pas via l'application. Rendez-vous DIRECTEMENT aux urgences de l'hôpital !"
-            )
         else:
             # Calcul du score cumulé
             score_total = sum(bareme[symp] for symp, selectionne in cochés.items() if selectionne)
@@ -99,77 +94,89 @@ with onglet1:
             else:
                 priorite = "Urgence"
 
-            est_apres_20h = maintenant_gmt.hour >= 20
-            est_urgent = score_total >= 8 or priorite in ["Élevée", "Urgence"]
+            # Les cas élevés (>=8), urgents ou urgences vitales sont pris en charge immédiatement
+            est_urgent = score_total >= 8 or priorite in ["Élevée", "Urgence"] or urgence_vitale
 
-            # Règle sur l'horaire selon l'heure GMT et le niveau d'urgence
-            if est_apres_20h and not est_urgent:
-                # Reprogrammation sur le jour suivant à partir de 08:00 GMT
-                date_rdv = maintenant_gmt + timedelta(days=1)
-                
-                # Calcul de l'horaire pour le lendemain
-                duree = 15
-                nb_patients = len(liste_patients)
-                total_minutes = nb_patients * duree
-                
-                rdv_dt = datetime(date_rdv.year, date_rdv.month, date_rdv.day, 8, 0, tzinfo=timezone.utc) + timedelta(minutes=total_minutes)
-                heure_rdv = rdv_dt.strftime("%Hh%M")
-                date_str = rdv_dt.strftime("%d/%m/%Y")
-
-                m_conseil = total_minutes - 10
-                cons_dt = datetime(date_rdv.year, date_rdv.month, date_rdv.day, 8, 0, tzinfo=timezone.utc) + timedelta(minutes=m_conseil)
-                heure_conseil = cons_dt.strftime("%Hh%M")
-
+            if est_urgent:
+                # Traitement immédiat : Aucune planification de créneau
+                date_str = maintenant_gmt.strftime("%d/%m/%Y")
                 liste_patients.append(
                     {
                         "nom": nom,
                         "date_rdv": date_str,
-                        "heure_rdv": heure_rdv,
-                        "priorite": priorite,
-                        "score": score_total,
-                        "statut": "Programmé pour demain",
+                        "heure_rdv": "IMMÉDIAT",
+                        "priorite": priorite if not urgence_vitale else "Urgence Vitale",
+                        "score": score_total if not urgence_vitale else 10,
+                        "statut": "Prise en charge immédiate (Urgence)",
                     }
                 )
 
-                st.warning("⚠️ Il est plus de 20h00 GMT. Seules les urgences sont reçues cette nuit.")
-                st.success("✅ Votre rendez-vous a été reprogrammé pour DEMAIN !")
-                st.info(f"📅 **Date :** {date_str} à **{heure_rdv} GMT**")
-                st.warning(f"📩 **Arrivée conseillée :** {heure_conseil} GMT (10 minutes avant).")
+                st.error("🚨 CAS URGENT / ÉLEVÉ DÉTECTÉE !")
+                st.warning("⚠️ Prise en charge **IMMÉDIATE** requis. Aucune planification de créneau nécessaire.")
+                st.info("Veuillez vous présenter DIRECTEMENT au service des urgences de l'hôpital.")
 
             else:
-                # Prise en charge aujourd'hui (Urgence après 20h ou créneau normal en journée)
+                # Cas Faible / Moyen -> Planification sur rendez-vous
+                # On ne compte que les patients programmés pour calculer les créneaux
+                patients_programmes = [p for p in liste_patients if p["heure_rdv"] != "IMMÉDIAT"]
+                nb_patients = len(patients_programmes)
                 duree = 15
-                nb_patients = len(liste_patients)
-                
-                # Heure de démarrage (8h00 sauf si c'est une urgence de nuit où c'est immédiat)
+                est_apres_20h = maintenant_gmt.hour >= 20
+
                 if est_apres_20h:
-                    rdv_dt = maintenant_gmt + timedelta(minutes=nb_patients * duree)
+                    # Reprogrammation sur le jour suivant à partir de 08:00 GMT pour les cas non urgents
+                    date_rdv = maintenant_gmt + timedelta(days=1)
+                    total_minutes = nb_patients * duree
+                    
+                    rdv_dt = datetime(date_rdv.year, date_rdv.month, date_rdv.day, 8, 0, tzinfo=timezone.utc) + timedelta(minutes=total_minutes)
+                    heure_rdv = rdv_dt.strftime("%Hh%M")
+                    date_str = rdv_dt.strftime("%d/%m/%Y")
+
+                    m_conseil = total_minutes - 10
+                    cons_dt = datetime(date_rdv.year, date_rdv.month, date_rdv.day, 8, 0, tzinfo=timezone.utc) + timedelta(minutes=m_conseil)
+                    heure_conseil = cons_dt.strftime("%Hh%M")
+
+                    liste_patients.append(
+                        {
+                            "nom": nom,
+                            "date_rdv": date_str,
+                            "heure_rdv": heure_rdv,
+                            "priorite": priorite,
+                            "score": score_total,
+                            "statut": "Programmé pour demain",
+                        }
+                    )
+
+                    st.warning("⚠️ Il est plus de 20h00 GMT. Seules les urgences sont reçues cette nuit.")
+                    st.success("✅ Votre rendez-vous a été reprogrammé pour DEMAIN !")
+                    st.info(f"📅 **Date :** {date_str} à **{heure_rdv} GMT**")
+                    st.warning(f"📩 **Arrivée conseillée :** {heure_conseil} GMT (10 minutes avant).")
+
                 else:
+                    # Programmation normale la journée (< 20h)
                     heure_debut = datetime(maintenant_gmt.year, maintenant_gmt.month, maintenant_gmt.day, 8, 0, tzinfo=timezone.utc)
                     base_dt = max(maintenant_gmt, heure_debut)
                     rdv_dt = base_dt + timedelta(minutes=nb_patients * duree)
 
-                heure_rdv = rdv_dt.strftime("%Hh%M")
-                cons_dt = rdv_dt - timedelta(minutes=10)
-                heure_conseil = cons_dt.strftime("%Hh%M")
-                date_str = rdv_dt.strftime("%d/%m/%Y")
+                    heure_rdv = rdv_dt.strftime("%Hh%M")
+                    cons_dt = rdv_dt - timedelta(minutes=10)
+                    heure_conseil = cons_dt.strftime("%Hh%M")
+                    date_str = rdv_dt.strftime("%d/%m/%Y")
 
-                liste_patients.append(
-                    {
-                        "nom": nom,
-                        "date_rdv": date_str,
-                        "heure_rdv": heure_rdv,
-                        "priorite": priorite,
-                        "score": score_total,
-                        "statut": "En attente",
-                    }
-                )
+                    liste_patients.append(
+                        {
+                            "nom": nom,
+                            "date_rdv": date_str,
+                            "heure_rdv": heure_rdv,
+                            "priorite": priorite,
+                            "score": score_total,
+                            "statut": "En attente",
+                        }
+                    )
 
-                st.success("✅ Inscription réussie !")
-                if est_apres_20h and est_urgent:
-                    st.error("🚨 Prise en charge d'urgence autorisée après 20h GMT.")
-                st.info(f"**Heure de consultation prévue (GMT) :** {heure_rdv}")
-                st.warning(f"📩 Veuillez arriver à **{heure_conseil} GMT** (10 minutes avant).")
+                    st.success("✅ Inscription réussie !")
+                    st.info(f"**Heure de consultation prévue (GMT) :** {heure_rdv}")
+                    st.warning(f"📩 Veuillez arriver à **{heure_conseil} GMT** (10 minutes avant).")
 
 
 # ==========================================
@@ -179,13 +186,12 @@ with onglet2:
     st.header("📊 Vue Hôpital & Gestion des Retards")
 
     if len(liste_patients) > 0:
-        st.subheader("Planning des rendez-vous :")
+        st.subheader("Planning des rendez-vous & urgences :")
         st.table(liste_patients)
 
         st.write("---")
-        st.subheader("🔍 Vérification du retard à l'arrivée :")
+        st.subheader("🔍 Vérification du patient à l'arrivée :")
 
-        # Saisie manuelle du nom du patient (au lieu de la liste déroulante)
         nom_saisi = st.text_input("Saisissez le nom du patient à vérifier :")
 
         heure_arrivee_reelle = st.text_input(
@@ -197,7 +203,6 @@ with onglet2:
             if not nom_saisi:
                 st.error("Veuillez saisir un nom.")
             else:
-                # Recherche insensible à la casse
                 info_p = next(
                     (p for p in liste_patients if p["nom"].strip().lower() == nom_saisi.strip().lower()),
                     None,
@@ -205,6 +210,11 @@ with onglet2:
 
                 if info_p is None:
                     st.error(f"❌ Aucun patient trouvé au nom de '{nom_saisi}'. Veuillez vérifier la saisie.")
+                elif info_p["heure_rdv"] == "IMMÉDIAT":
+                    st.error(
+                        f"🚨 Patient **{info_p['nom']}** enregistré en PRISE EN CHARGE IMMÉDIATE ({info_p['priorite']}). Envoyez-le directement au service d'urgence !"
+                    )
+                    info_p["statut"] = "Pris en charge (Urgence)"
                 else:
                     heure_rdv = info_p["heure_rdv"]
 
