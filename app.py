@@ -6,7 +6,14 @@ st.set_page_config(
     page_title="Gestion File d'Attente Hôpital", page_icon="🏥"
 )
 
+# --- EN-TÊTE DE L'APPLICATION ---
 st.title("🏥 Système Intelligent de Gestion des Files d'Attente")
+
+# Message d'avertissement d'annulation automatique ajouté sous le titre
+st.warning(
+    "⚠️ **Attention :** Si vous n'arrivez pas à l'heure prévue, votre rendez-vous est automatiquement annulé."
+)
+
 st.write(
     "Inscrivez-vous à distance pour obtenir votre heure de passage estimée."
 )
@@ -59,19 +66,6 @@ def mettre_a_jour_statuts_automatiques(liste_p, maintenant):
 # Obtention de l'heure GMT actuelle et mise à jour automatique des annulations
 maintenant_gmt = datetime.now(timezone.utc)
 mettre_a_jour_statuts_automatiques(liste_patients, maintenant_gmt)
-
-# ==============================================================================
-# SIGNALEMENT DES ANNULATIONS (Placé sous le titre et l'introduction)
-# ==============================================================================
-patients_annules = [p for p in liste_patients if "Annulé" in p["statut"]]
-if patients_annules:
-    st.error(
-        f"🚨 **SIGNALEMENT D'ANNULATION AUTOMATIQUE :** {len(patients_annules)} rendez-vous annulé(s) pour absence ou retard."
-    )
-    for p in patients_annules:
-        st.warning(
-            f"❌ **Rendez-vous annulé :** {p['nom']} — Créneau de **{p['heure_rdv']}** (du {p['date_rdv']}). Motif : Heure dépassée sans signalement à l'accueil."
-        )
 
 
 # Crée deux onglets dans l'application web
@@ -247,7 +241,7 @@ with onglet2:
                     st.error(f"❌ Aucun patient trouvé au nom de '{nom_saisi}'. Veuillez vérifier la saisie.")
                 elif info_p["statut"] == "Annulé (Absence / Non-présenté)":
                     st.error(
-                        f"❌ Le rendez-vous de **{info_p['nom']}** a été ANNULÉ automatiquement car l'heure est dépassée sans confirmation de présence."
+                        f"❌ Le rendez-vous de **{info_p['nom']}** a été ANNULÉ automatiquement par le système car l'heure de passage est dépassée sans signalement d'arrivée."
                     )
                 elif info_p["heure_rdv"] == "IMMÉDIAT":
                     st.error(
