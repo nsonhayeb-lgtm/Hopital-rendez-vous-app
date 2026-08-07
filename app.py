@@ -1,48 +1,68 @@
 import os
+import json
 import streamlit as st
 from datetime import datetime, timezone, timedelta
 
 # Configuration de la page
 st.set_page_config(
-    page_title="Gestion File d'Attente Hôpital", page_icon="🏥"
+    page_title="Gestion File d'Attente Hôpital", page_icon="🏥", layout="wide"
 )
 
-# --- GESTION DYNAMIQUE DU MOT DE PASSE ---
+# --- FICHIERS DE STOCKAGE PERMANENT ---
 FICHIER_MDP = "mdp_staff.txt"
+FICHIER_HISTORIQUE = "historique_patients.json"
 
+
+# --- FONCTIONS DE GESTION DES FICHIERS ---
 def lire_mot_de_passe():
-    """Lit le mot de passe dans le fichier local ou retourne un mot de passe par défaut."""
     if os.path.exists(FICHIER_MDP):
         with open(FICHIER_MDP, "r", encoding="utf-8") as f:
             return f.read().strip()
-    return "hopital2026"  # Mot de passe par défaut à la première utilisation
+    return "hopital2026"
+
 
 def sauvegarder_mot_de_passe(nouveau_mdp):
-    """Enregistre le nouveau mot de passe dans le fichier local."""
     with open(FICHIER_MDP, "w", encoding="utf-8") as f:
         f.write(nouveau_mdp)
 
 
-# --- EN-TÊTE DE L'APPLICATION ---
-st.title("🏥 Système Intelligent de Gestion des Files d'Attente")
-
-st.warning(
-    "⚠️ **Attention :** Si vous n'arrivez pas à l'heure prévue, votre rendez-vous est automatiquement annulé."
-)
-
-st.write(
-    "Inscrivez-vous à distance pour obtenir votre heure de passage estimée."
-)
-
-
-# Mémoire partagée globale entre tous les utilisateurs
-@st.cache_resource
-def obtenir_registre_global():
+def charger_historique_fichier():
+    if os.path.exists(FICHIER_HISTORIQUE):
+        try:
+            with open(FICHIER_HISTORIQUE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return []
     return []
 
 
-# On récupère la liste partagée
-liste_patients = obtenir_registre_global()
+def sauvegarder_historique_fichier(historique):
+    with open(FICHIER_HISTORIQUE, "w", encoding="utf-8") as f:
+        json.dump(historique, f, ensure_ascii=False, indent=2)
+
+
+# --- MÉMOIRE PARTAGÉE ET RÉINITIALISATION AUTOMATIQUE DU JOUR ---
+@st.cache_resource
+def obtenir_memoire_globale():
+    return {
+        "date_courante": None,
+        "file_du_jour": [],
+        "historique_global": charger_historique_fichier()
+    }
+
+
+maintenant_gmt = datetime.now(timezone.utc)
+date_aujourdhui = maintenant_gmt.strftime("%d/%m/%Y")
+
+memoire = obtenir_memoire_globale()
+
+# Réinitialisation de la file active si on change de jour
+if memoire["date_courante"] != date_aujourdhui:
+    memoire["date_courante"] = date_aujourdhui
+    memoire["file_du_jour"].clear()
+
+liste_patients = memoire["file_du_jour"]
+historique_patients = memoire["historique_global"]
 
 # Bareme complet des symptômes
 bareme = {
@@ -61,7 +81,6 @@ bareme = {
 }
 
 
-# Fonction d'annulation automatique des rendez-vous dépassés
 def mettre_a_jour_statuts_automatiques(liste_p, maintenant):
     for p in liste_p:
         if p["statut"] in ["En attente", "Programmé pour demain"] and p["heure_rdv"] != "IMMÉDIAT":
@@ -77,46 +96,39 @@ def mettre_a_jour_statuts_automatiques(liste_p, maintenant):
                 pass
 
 
-# Obtention de l'heure GMT actuelle et mise à jour automatique des annulations
-maintenant_gmt = datetime.now(timezone.utc)
 mettre_a_jour_statuts_automatiques(liste_patients, maintenant_gmt)
 
 
-# Crée deux onglets dans l'application web
-onglet1, onglet2 = st.tabs(
-    ["📝 Inscription Patient", "⏱️ Accueil & Contrôle des Retards"]
-)
+# --- EN-TÊTE ---
+st.title("🏥 Système Intelligent de Gestion des Files d'Attente")
+st.warning("⚠️ **Attention :** Si vous n'arrivez pas à l'heure prévue, votre rendez-vous est automatiquement annulé.")
+st.write("Inscrivez-vous à distance pour obtenir votre heure de passage estimée.")
+
+
+onglet1, onglet2 = st.tabs([
+    "📝 Inscription Patient",
+    "🔒 Espace Personnel Hôpital"
+])
 
 # ==========================================
-# ONGLET 1 : INSCRIPTION PATIENT A DISTANCE
+# ONGLET 1 : INSCRIPTION PATIENT
 # ==========================================
 with onglet1:
     st.header("Formulaire d'inscription")
-
-    st.info(f"🕒 **Heure actuelle (GMT) :** {maintenant_gmt.strftime('%H:%M')}")
+    st.info(f"🕒 **Heure actuelle (GMT) :** {maintenant_gmt.strftime('%H:%M')} | 📅 **Date :** {date_aujourdhui}")
 
     with st.form("form_patient"):
         nom = st.text_input("Nom & Prénom")
         age = st.number_input("Âge", min_value=0, max_value=120, value=25)
         sexe = st.selectbox("Sexe", ["M", "F"])
-        service = st.selectbox(
-            "Service demandé",
-            ["Cardiologie", "Pédiatrie", "Médecine Générale"],
-        )
+        service = st.selectbox("Service demandé", ["Cardiologie", "Pédiatrie", "Médecine Générale"])
 
         st.write("---")
         st.subheader("Sélectionnez vos symptômes / état :")
-
-        cochés = {}
-        for symptome in bareme.keys():
-            cochés[symptome] = st.checkbox(symptome)
+        cochés = {symp: st.checkbox(symp) for symp in bareme.keys()}
 
         st.write("---")
-        st.write("**Cas d'urgences graves :**")
-        urgence_vitale = st.checkbox(
-            "Accident grave / AVC / Crise cardiaque suspectée"
-        )
-
+        urgence_vitale = st.checkbox("Accident grave / AVC / Crise cardiaque suspectée")
         submit = st.form_submit_button("S'inscrire")
 
     if submit:
@@ -137,18 +149,18 @@ with onglet1:
             est_urgent = score_total >= 8 or priorite in ["Élevée", "Urgence"] or urgence_vitale
 
             if est_urgent:
-                date_str = maintenant_gmt.strftime("%d/%m/%Y")
-                liste_patients.append(
-                    {
-                        "nom": nom,
-                        "date_rdv": date_str,
-                        "heure_rdv": "IMMÉDIAT",
-                        "priorite": priorite if not urgence_vitale else "Urgence Vitale",
-                        "score": score_total if not urgence_vitale else 10,
-                        "statut": "Prise en charge immédiate (Urgence)",
-                    }
-                )
-
+                date_str = date_aujourdhui
+                nouveau_patient = {
+                    "id_enregistrement": len(historique_patients) + 1,
+                    "nom": nom,
+                    "service": service,
+                    "date_rdv": date_str,
+                    "heure_rdv": "IMMÉDIAT",
+                    "priorite": priorite if not urgence_vitale else "Urgence Vitale",
+                    "score": score_total if not urgence_vitale else 10,
+                    "statut": "Prise en charge immédiate (Urgence)",
+                    "heure_inscription": maintenant_gmt.strftime("%H:%M")
+                }
                 st.error("🚨 CAS URGENT / ÉLEVÉ DÉTECTÉ !")
                 st.warning("⚠️ Prise en charge **IMMÉDIATE** requise. Aucune planification de créneau nécessaire.")
                 st.info("Veuillez vous présenter DIRECTEMENT au service des urgences de l'hôpital.")
@@ -171,16 +183,17 @@ with onglet1:
                     cons_dt = datetime(date_rdv.year, date_rdv.month, date_rdv.day, 8, 0, tzinfo=timezone.utc) + timedelta(minutes=m_conseil)
                     heure_conseil = cons_dt.strftime("%Hh%M")
 
-                    liste_patients.append(
-                        {
-                            "nom": nom,
-                            "date_rdv": date_str,
-                            "heure_rdv": heure_rdv,
-                            "priorite": priorite,
-                            "score": score_total,
-                            "statut": "Programmé pour demain",
-                        }
-                    )
+                    nouveau_patient = {
+                        "id_enregistrement": len(historique_patients) + 1,
+                        "nom": nom,
+                        "service": service,
+                        "date_rdv": date_str,
+                        "heure_rdv": heure_rdv,
+                        "priorite": priorite,
+                        "score": score_total,
+                        "statut": "Programmé pour demain",
+                        "heure_inscription": maintenant_gmt.strftime("%H:%M")
+                    }
 
                     st.warning("⚠️ Il est plus de 20h00 GMT. Seules les urgences sont reçues cette nuit.")
                     st.success("✅ Votre rendez-vous a été reprogrammé pour DEMAIN !")
@@ -197,137 +210,158 @@ with onglet1:
                     heure_conseil = cons_dt.strftime("%Hh%M")
                     date_str = rdv_dt.strftime("%d/%m/%Y")
 
-                    liste_patients.append(
-                        {
-                            "nom": nom,
-                            "date_rdv": date_str,
-                            "heure_rdv": heure_rdv,
-                            "priorite": priorite,
-                            "score": score_total,
-                            "statut": "En attente",
-                        }
-                    )
+                    nouveau_patient = {
+                        "id_enregistrement": len(historique_patients) + 1,
+                        "nom": nom,
+                        "service": service,
+                        "date_rdv": date_str,
+                        "heure_rdv": heure_rdv,
+                        "priorite": priorite,
+                        "score": score_total,
+                        "statut": "En attente",
+                        "heure_inscription": maintenant_gmt.strftime("%H:%M")
+                    }
 
                     st.success("✅ Inscription réussie !")
                     st.info(f"**Heure de consultation prévue (GMT) :** {heure_rdv}")
                     st.warning(f"📩 Veuillez arriver à **{heure_conseil} GMT** (10 minutes avant).")
 
+            # Ajout à la file active du jour ET à l'historique permanent
+            liste_patients.append(nouveau_patient)
+            historique_patients.append(nouveau_patient)
+            sauvegarder_historique_fichier(historique_patients)
+
 
 # ==========================================
-# ONGLET 2 : CONTROLE DU RETARD (Personnel Hôpital)
+# ONGLET 2 : ESPACE PERSONNEL (Sécurisé)
 # ==========================================
 with onglet2:
-    st.header("🔒 Espace Réservé au Personnel de l'Hôpital")
-
-    # Initialisation de l'état de connexion
     if "staff_connecte" not in st.session_state:
         st.session_state.staff_connecte = False
 
     mdp_actuel = lire_mot_de_passe()
 
     if not st.session_state.staff_connecte:
-        st.warning("⚠️ Accès restreint. Veuillez vous connecter avec le mot de passe du personnel.")
-        
+        st.header("🔒 Connexion Réservée au Personnel")
         with st.form("form_connexion_staff"):
             mot_de_passe = st.text_input("Mot de passe", type="password")
             submit_login = st.form_submit_button("Se connecter")
-            
+
         if submit_login:
             if mot_de_passe == mdp_actuel:
                 st.session_state.staff_connecte = True
-                st.success("Connexion réussie !")
                 st.rerun()
             else:
                 st.error("❌ Mot de passe incorrect.")
     else:
-        # Barre d'actions du personnel (Déconnexion & Modification MDP)
-        col_btn1, col_btn2 = st.columns([1, 2])
-        
-        with col_btn1:
+        # Barre d'outils du personnel
+        c1, c2, c3 = st.columns([1, 2, 2])
+        with c1:
             if st.button("Se déconnecter"):
                 st.session_state.staff_connecte = False
                 st.rerun()
+        with c2:
+            if st.button("🗑️ Vider manuellement la file du jour"):
+                liste_patients.clear()
+                st.success("La file d'attente du jour a été réinitialisée !")
+                st.rerun()
 
-        with st.expander("🔑 Modifier le mot de passe de l'espace personnel"):
+        with st.expander("🔑 Modifier le mot de passe d'accès"):
             with st.form("form_change_mdp"):
                 nouveau_mdp = st.text_input("Nouveau mot de passe", type="password")
-                confirmation_mdp = st.text_input("Confirmer le nouveau mot de passe", type="password")
-                submit_change = st.form_submit_button("Enregistrer le nouveau mot de passe")
-                
-            if submit_change:
-                if not nouveau_mdp:
-                    st.error("Le mot de passe ne peut pas être vide.")
-                elif nouveau_mdp != confirmation_mdp:
-                    st.error("Les deux mots de passe ne correspondent pas.")
-                else:
-                    sauvegarder_mot_de_passe(nouveau_mdp)
-                    st.success("✅ Mot de passe mis à jour avec succès !")
+                confirmation_mdp = st.text_input("Confirmer le mot de passe", type="password")
+                if st.form_submit_button("Changer le mot de passe"):
+                    if nouveau_mdp and nouveau_mdp == confirmation_mdp:
+                        sauvegarder_mot_de_passe(nouveau_mdp)
+                        st.success("Mot de passe modifié avec succès !")
+                    else:
+                        st.error("Erreur lors de la saisie des mots de passe.")
 
         st.write("---")
-        st.subheader("📊 Planning des rendez-vous & urgences")
 
-        if len(liste_patients) > 0:
-            st.table(liste_patients)
+        # Sous-onglets pour séparer la vue du jour et les archives globales
+        sub_tab1, sub_tab2 = st.tabs([
+            "⚡ File Active du Jour",
+            "📜 Archives & Historique Complet"
+        ])
 
-            st.write("---")
-            st.subheader("🔍 Vérification du patient à l'arrivée")
+        # --- SOUS-ONGLET 1 : FILE DU JOUR ---
+        with sub_tab1:
+            st.subheader(f"📊 Planning du jour ({date_aujourdhui})")
+            if len(liste_patients) > 0:
+                st.table(liste_patients)
 
-            nom_saisi = st.text_input("Saisissez le nom du patient à vérifier :")
+                st.write("---")
+                st.subheader("🔍 Vérification du patient à l'arrivée")
 
-            heure_arrivee_reelle = st.text_input(
-                "Heure d'arrivée réelle à l'accueil (Format GMT, ex: 08h20 ou 20:15)",
-                maintenant_gmt.strftime("%Hh%M"),
-            )
+                nom_saisi = st.text_input("Saisissez le nom du patient à vérifier :")
+                heure_arrivee_reelle = st.text_input(
+                    "Heure d'arrivée réelle à l'accueil (Format GMT)",
+                    maintenant_gmt.strftime("%Hh%M")
+                )
 
-            if st.button("Vérifier l'arrivée"):
-                if not nom_saisi:
-                    st.error("Veuillez saisir un nom.")
-                else:
-                    info_p = next(
-                        (p for p in liste_patients if p["nom"].strip().lower() == nom_saisi.strip().lower()),
-                        None,
-                    )
-
-                    if info_p is None:
-                        st.error(f"❌ Aucun patient trouvé au nom de '{nom_saisi}'. Veuillez vérifier la saisie.")
-                    elif info_p["statut"] == "Annulé (Absence / Non-présenté)":
-                        st.error(
-                            f"❌ Le rendez-vous de **{info_p['nom']}** a été ANNULÉ automatiquement par le système car l'heure de passage est dépassée sans signalement d'arrivée."
-                        )
-                    elif info_p["heure_rdv"] == "IMMÉDIAT":
-                        st.error(
-                            f"🚨 Patient **{info_p['nom']}** enregistré en PRISE EN CHARGE IMMÉDIATE ({info_p['priorite']}). Envoyez-le directement au service d'urgence !"
-                        )
-                        info_p["statut"] = "Pris en charge (Urgence)"
+                if st.button("Vérifier l'arrivée"):
+                    if not nom_saisi:
+                        st.error("Veuillez saisir un nom.")
                     else:
-                        heure_rdv = info_p["heure_rdv"]
+                        info_p = next(
+                            (p for p in liste_patients if p["nom"].strip().lower() == nom_saisi.strip().lower()),
+                            None,
+                        )
 
-                        h_rdv, m_rdv = map(int, heure_rdv.split("h"))
-                        min_rdv = h_rdv * 60 + m_rdv
+                        if info_p is None:
+                            st.error(f"❌ Aucun patient trouvé au nom de '{nom_saisi}' dans la file du jour.")
+                        elif info_p["statut"] == "Annulé (Absence / Non-présenté)":
+                            st.error(f"❌ Le rendez-vous de **{info_p['nom']}** a été ANNULÉ automatiquement pour dépassement d'horaire.")
+                        elif info_p["heure_rdv"] == "IMMÉDIAT":
+                            st.error(f"🚨 Patient **{info_p['nom']}** en PRISE EN CHARGE IMMÉDIATE. Envoyez-le aux urgences !")
+                            info_p["statut"] = "Pris en charge (Urgence)"
+                        else:
+                            h_rdv, m_rdv = map(int, info_p["heure_rdv"].split("h"))
+                            min_rdv = h_rdv * 60 + m_rdv
 
-                        heure_clean = heure_arrivee_reelle.replace(":", "h")
-                        try:
-                            h_arr, m_arr = map(int, heure_clean.split("h"))
-                            min_arr = h_arr * 60 + m_arr
+                            heure_clean = heure_arrivee_reelle.replace(":", "h")
+                            try:
+                                h_arr, m_arr = map(int, heure_clean.split("h"))
+                                min_arr = h_arr * 60 + m_arr
+                                retard = min_arr - min_rdv
 
-                            retard = min_arr - min_rdv
+                                if retard <= 0:
+                                    st.success(f"✅ Patient **{info_p['nom']}** à l'heure ! ({abs(retard)} min d'avance). Envoyez-le en salle d'attente.")
+                                    info_p["statut"] = "Présent"
+                                elif retard <= 10:
+                                    st.warning(f"⚠️ Retard toléré pour **{info_p['nom']}** ({retard} min). Le patient est admis.")
+                                    info_p["statut"] = "Présent (Retard accepté)"
+                                else:
+                                    st.error(f"🚨 RETARD DE {retard} MIN (> 10 min) ! Rendez-vous ANNULÉ.")
+                                    info_p["statut"] = "Annulé (Retard)"
 
-                            if retard <= 0:
-                                st.success(
-                                    f"✅ Patient **{info_p['nom']}** à l'heure ! ({abs(retard)} min d'avance). Envoyez-le en salle d'attente."
-                                )
-                                info_p["statut"] = "Présent"
-                            elif retard <= 10:
-                                st.warning(
-                                    f"⚠️ Retard toléré pour **{info_p['nom']}** ({retard} min). Le patient est admis."
-                                )
-                                info_p["statut"] = "Présent (Retard accepté)"
-                            else:
-                                st.error(
-                                    f"🚨 RETARD DE {retard} MIN (> 10 min) ! Rendez-vous ANNULÉ."
-                                )
-                                info_p["statut"] = "Annulé (Retard)"
-                        except ValueError:
-                            st.error("Format d'heure d'arrivée invalide. Utilisez 'HHhMM' ou 'HH:MM'.")
-        else:
-            st.write("Aucun patient inscrit pour le moment.")
+                                # Mise à jour synchronisée du statut dans l'historique permanent
+                                for h_p in historique_patients:
+                                    if h_p.get("id_enregistrement") == info_p.get("id_enregistrement"):
+                                        h_p["statut"] = info_p["statut"]
+                                sauvegarder_historique_fichier(historique_patients)
+
+                            except ValueError:
+                                st.error("Format d'heure invalide (Utiliser HHhMM ou HH:MM).")
+            else:
+                st.info("Aucun patient inscrit dans la file d'attente du jour.")
+
+        # --- SOUS-ONGLET 2 : ARCHIVES ET HISTORIQUE ---
+        with sub_tab2:
+            st.subheader("📚 Registre Complet de Tous les Rendez-vous")
+            st.write(f"Total des inscriptions enregistrées dans l'historique : **{len(historique_patients)}**")
+
+            if len(historique_patients) > 0:
+                filtre_recherche = st.text_input("🔎 Rechercher dans les archives (par nom ou date DD/MM/YYYY) :")
+
+                if filtre_recherche:
+                    res = [
+                        p for p in historique_patients
+                        if filtre_recherche.lower() in p["nom"].lower() or filtre_recherche in p["date_rdv"]
+                    ]
+                    st.table(res)
+                else:
+                    st.table(historique_patients)
+            else:
+                st.info("Aucune archive enregistrée pour le moment.")
