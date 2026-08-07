@@ -56,7 +56,7 @@ date_aujourdhui = maintenant_gmt.strftime("%d/%m/%Y")
 
 memoire = obtenir_memoire_globale()
 
-# Réinitialisation de la file active si on change de jour
+# Réinitialisation automatique de la file active lors du passage au jour suivant
 if memoire["date_courante"] != date_aujourdhui:
     memoire["date_courante"] = date_aujourdhui
     memoire["file_du_jour"].clear()
@@ -64,7 +64,7 @@ if memoire["date_courante"] != date_aujourdhui:
 liste_patients = memoire["file_du_jour"]
 historique_patients = memoire["historique_global"]
 
-# Bareme complet des symptômes
+# Barème complet des symptômes
 bareme = {
     "Congestion nasale (nez bouché)": 1,
     "Maux de gorge légers": 2,
@@ -254,17 +254,10 @@ with onglet2:
             else:
                 st.error("❌ Mot de passe incorrect.")
     else:
-        # Barre d'outils du personnel
-        c1, c2, c3 = st.columns([1, 2, 2])
-        with c1:
-            if st.button("Se déconnecter"):
-                st.session_state.staff_connecte = False
-                st.rerun()
-        with c2:
-            if st.button("🗑️ Vider manuellement la file du jour"):
-                liste_patients.clear()
-                st.success("La file d'attente du jour a été réinitialisée !")
-                st.rerun()
+        # Bouton de déconnexion seul
+        if st.button("Se déconnecter"):
+            st.session_state.staff_connecte = False
+            st.rerun()
 
         with st.expander("🔑 Modifier le mot de passe d'accès"):
             with st.form("form_change_mdp"):
