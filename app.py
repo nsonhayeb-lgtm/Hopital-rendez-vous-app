@@ -121,7 +121,7 @@ with onglet1:
         nom = st.text_input("Nom & Prénom")
         age = st.number_input("Âge", min_value=0, max_value=120, value=25)
         sexe = st.selectbox("Sexe", ["M", "F"])
-        service = st.selectbox("Service demandé", ["Cardiologie", "Pédiatrie", "Médecine Générale"])
+        service = st.selectbox("Service demandé", ["Cardiologie", "Pédiatrie", "Médecine Générale"], key="patient_service_select")
 
         st.write("---")
         st.subheader("Sélectionnez vos symptômes / état :")
